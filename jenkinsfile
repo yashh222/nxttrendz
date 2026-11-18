@@ -16,7 +16,23 @@ pipeline {
                     url: 'https://github.com/yashh222/nxttrendz'
             }
         }
+        stage('Debug Project Structure') {
+            steps {
+                sh '''
+                    echo "Workspace:"
+                    pwd
 
+                    echo "Root files:"
+                    ls -la
+
+                    echo "Backend directory:"
+                    ls -la backend/
+
+                    echo "Requirements file:"
+                    ls -l backend/requirements.txt
+                '''
+            }
+}
         stage('Backend Validation') {
             steps {
                 echo 'Checking Django backend...'
