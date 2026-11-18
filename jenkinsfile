@@ -1,23 +1,101 @@
+
 pipeline {
     agent any
+
     environment {
-        DOCKER_ID  = 'yashdev1'
-        BACKEND    = "${DOCKER_ID}/nxttrendz-backend"
-        FRONTEND   = "${DOCKER_ID}/nxttrendz-frontend"
+        DOCKER_ID = 'yashdev1'
+        BACKEND   = "${DOCKER_ID}/nxttrendz-backend"
+        FRONTEND  = "${DOCKER_ID}/nxttrendz-frontend"
     }
+
     stages {
-        stage('Checkout') { steps { git branch: 'main', url: 'https://github.com/yashh222/nxttrendz' } }
-        stage('Build') { steps {
-            sh 'docker build -t $BACKEND:$BUILD_NUMBER ./backend'
-            sh 'docker build -t $FRONTEND:$BUILD_NUMBER ./frontend'
-        } }
-        stage('Push') { steps {
-            withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials',
-                usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                sh 'docker push $BACKEND:$BUILD_NUMBER'
-                sh 'docker push $FRONTEND:$BUILD_NUMBER'
+
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/yashh222/nxttrendz'
             }
-        } }
+        }
+
+        stage('Backend Validation') {
+            steps {
+                echo 'Checking Django backend...'
+
+                sh '''
+                    set -e
+
+                    docker run --rm \
+                      -v "$WORKSPACE/backend:/app" \
+                      -w /app \
+                      python:3.13-slim \
+                      sh -c "pip install --no-cache-dir -r requirements.txt &&
+                             python manage.py check &&
+                             python manage.py test"
+                '''
+            }
+        }
+
+        stage('Frontend Validation') {
+            steps {
+                echo 'Checking React frontend...'
+
+                sh '''
+                    set -e
+
+                    docker run --rm \
+                      -v "$WORKSPACE/frontend:/app" \
+                      -w /app \
+                      node:20-alpine \
+                      sh -c "npm ci &&
+                             npm run lint &&
+                             npm run build"
+                '''
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                echo 'Building Docker images...'
+
+                sh '''
+                    docker build -t $BACKEND:$BUILD_NUMBER ./backend
+                    docker build -t $FRONTEND:$BUILD_NUMBER ./frontend
+                '''
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+
+                        printf '%s' "$DOCKER_PASS" |
+                        docker login -u "$DOCKER_USER" --password-stdin
+
+                        docker push $BACKEND:$BUILD_NUMBER
+                        docker push $FRONTEND:$BUILD_NUMBER
+
+                        docker logout
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'SUCCESS: All validations passed and images pushed!'
+        }
+
+        failure {
+            echo 'FAILED: Pipeline stopped. Docker images were not pushed if validation failed.'
+        }
     }
 }
